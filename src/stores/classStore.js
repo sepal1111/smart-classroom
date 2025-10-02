@@ -3,6 +3,7 @@
 
 import { defineStore } from 'pinia';
 import * as firestoreService from '../services/firestoreService';
+import * as googleDriveService from '../services/googleDriveService';
 
 export const useClassStore = defineStore('class', {
   state: () => ({
@@ -244,17 +245,42 @@ export const useClassStore = defineStore('class', {
         this.isLoading = true;
         this.error = null;
         try {
-            // 回傳的資料會是 [{ studentId: '...', ... }, ...]
             const submissions = await firestoreService.getSubmissions(assignmentId);
-            // 轉換成前端需要的 [studentId, submissionData] 格式
             return submissions.map(sub => [sub.studentId, sub]);
         } catch (err) {
             this.error = `讀取作業 ${assignmentId} 的繳交紀錄時發生錯誤`;
             console.error(this.error, err);
-            return []; // 發生錯誤時回傳空陣列
+            return [];
         } finally {
             this.isLoading = false;
         }
+    },
+
+    async submitAssignmentFile(assignment, student, file) {
+      this.isLoading = true;
+      this.error = null;
+      try {
+        const driveFileInfo = await googleDriveService.uploadFile(
+          file,
+          assignment.name,
+          student.name
+        );
+        const submissionData = {
+          studentName: student.name,
+          fileName: driveFileInfo.name,
+          driveFileId: driveFileInfo.id,
+          webViewLink: driveFileInfo.webViewLink,
+          iconLink: driveFileInfo.iconLink,
+        };
+        await firestoreService.setSubmission(assignment.id, student.id, submissionData);
+        return submissionData;
+      } catch (err) {
+        this.error = `繳交作業時發生錯誤: ${err.message}`;
+        console.error(this.error, err);
+        throw err;
+      } finally {
+        this.isLoading = false;
+      }
     },
 
     // --- 即時互動 Actions ---
@@ -285,11 +311,9 @@ export const useClassStore = defineStore('class', {
     },
 
     subscribeToInteraction() {
-        // 如果已經有監聽器在跑，先停止它
         if (this.unsubscribeListener) {
             this.unsubscribeListener();
         }
-        // 建立新的監聽器
         this.unsubscribeListener = firestoreService.listenToInteractionSession((sessionData) => {
             this.liveInteractionSession = sessionData;
         });
@@ -300,8 +324,7 @@ export const useClassStore = defineStore('class', {
             this.unsubscribeListener();
             this.unsubscribeListener = null;
         }
-        this.liveInteractionSession = null; // 清空互動資料
+        this.liveInteractionSession = null;
     },
   },
 });
-
